@@ -61,6 +61,9 @@
 | **r** | Database Deep Dive | [r-database.md](./r-database.md) + [visual](./r-database-visual.md) | sqlx, transactions, isolation, sharding, multi-tenancy |
 | **s** | Tauri Desktop/Mobile | [s-tauri.md](./s-tauri.md) + [visual](./s-tauri-visual.md) | IPC, commands, events, capabilities, packaging, updater |
 | **t** | WASM (WebAssembly) | [t-wasm.md](./t-wasm.md) + [visual](./t-wasm-visual.md) | wasm-bindgen, wasm-pack, WASI, edge computing, frameworks |
+| **u** | CLI Tools | [u-cli-tools.md](./u-cli-tools.md) + [visual](./u-cli-tools-visual.md) | clap, dialoguer, indicatif, ratatui, config, distribution |
+| **v** | gRPC với tonic | [v-grpc-tonic.md](./v-grpc-tonic.md) + [visual](./v-grpc-tonic-visual.md) | protobuf, streaming, interceptors, mTLS, distributed tracing |
+| **w** | Networking | [w-networking.md](./w-networking.md) + [visual](./w-networking-visual.md) | mio, smoltcp, custom protocols, framing, QUIC, P2P, performance |
 
 ---
 
@@ -86,16 +89,19 @@
 - **Web/Backend dev**: q + r (sau khi nắm a-o)
 - **Desktop/Mobile dev**: s (sau khi nắm a-o)
 - **Browser/Edge dev**: t (sau khi nắm a-o, đặc biệt f, n)
+- **CLI tool builder**: u (sau khi nắm a-h, plus g cho error handling)
+- **Microservices/gRPC dev**: v (sau khi nắm f, g, l, q)
+- **Network protocol designer**: w (sau khi nắm f, g, n, v)
 
 ---
 
 ## 📊 Thống kê
 
-- **20 chủ đề** × 2 files = **40 files**
-- **~63,000 dòng** Markdown
-- **~6.5 MB** tài liệu
-- **~13 giờ đọc** end-to-end
-- **~45-65 giờ** để thực sự thấm hiểu
+- **23 chủ đề** × 2 files = **46 files**
+- **~81,000 dòng** Markdown
+- **~8 MB** tài liệu
+- **~16 giờ đọc** end-to-end
+- **~60-80 giờ** để thực sự thấm hiểu
 
 ---
 
@@ -109,6 +115,9 @@ Bạn có khả năng build:
 - 🖥️ **Desktop applications** (Tauri)
 - 📱 **Mobile apps** (Tauri v2)
 - 🌍 **Browser apps & edge compute** (WASM + Yew/Leptos/Cloudflare Workers)
+- 📟 **CLI tools** (clap + dialoguer + indicatif + ratatui)
+- 🔌 **gRPC microservices** (tonic + protobuf + streaming + mTLS)
+- 🔗 **Custom networking** (mio + smoltcp + framing + QUIC + P2P)
 - 🚀 **High-performance services** (profiled, optimized)
 - 🧪 **Well-tested codebases** (unit + integration + e2e + property + fuzz)
 - 🔍 **Observable production code** (3 pillars correlated)
