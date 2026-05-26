@@ -60,6 +60,7 @@
 | **q** | Axum Web Project | [q-axum-project.md](./q-axum-project.md) + [visual](./q-axum-project-visual.md) | Routing, extractors, middleware, error, auth, deploy |
 | **r** | Database Deep Dive | [r-database.md](./r-database.md) + [visual](./r-database-visual.md) | sqlx, transactions, isolation, sharding, multi-tenancy |
 | **s** | Tauri Desktop/Mobile | [s-tauri.md](./s-tauri.md) + [visual](./s-tauri-visual.md) | IPC, commands, events, capabilities, packaging, updater |
+| **t** | WASM (WebAssembly) | [t-wasm.md](./t-wasm.md) + [visual](./t-wasm-visual.md) | wasm-bindgen, wasm-pack, WASI, edge computing, frameworks |
 
 ---
 
@@ -84,16 +85,17 @@
 - **Embedded developer**: p (sau khi nắm a-j)
 - **Web/Backend dev**: q + r (sau khi nắm a-o)
 - **Desktop/Mobile dev**: s (sau khi nắm a-o)
+- **Browser/Edge dev**: t (sau khi nắm a-o, đặc biệt f, n)
 
 ---
 
 ## 📊 Thống kê
 
-- **19 chủ đề** × 2 files = **38 files**
-- **~57,000 dòng** Markdown
-- **~6 MB** tài liệu
-- **~12 giờ đọc** end-to-end
-- **~40-60 giờ** để thực sự thấm hiểu
+- **20 chủ đề** × 2 files = **40 files**
+- **~63,000 dòng** Markdown
+- **~6.5 MB** tài liệu
+- **~13 giờ đọc** end-to-end
+- **~45-65 giờ** để thực sự thấm hiểu
 
 ---
 
@@ -106,6 +108,7 @@ Bạn có khả năng build:
 - 🔌 **Embedded firmware** (no_std + embassy)
 - 🖥️ **Desktop applications** (Tauri)
 - 📱 **Mobile apps** (Tauri v2)
+- 🌍 **Browser apps & edge compute** (WASM + Yew/Leptos/Cloudflare Workers)
 - 🚀 **High-performance services** (profiled, optimized)
 - 🧪 **Well-tested codebases** (unit + integration + e2e + property + fuzz)
 - 🔍 **Observable production code** (3 pillars correlated)
