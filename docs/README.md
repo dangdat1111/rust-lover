@@ -65,12 +65,19 @@
 | **v** | gRPC với tonic | [v-grpc-tonic.md](./v-grpc-tonic.md) + [visual](./v-grpc-tonic-visual.md) | protobuf, streaming, interceptors, mTLS, distributed tracing |
 | **w** | Networking | [w-networking.md](./w-networking.md) + [visual](./w-networking-visual.md) | mio, smoltcp, custom protocols, framing, QUIC, P2P, performance |
 
+### Bổ sung: Đào sâu nền tảng (x)
+
+| # | Chủ đề | File | Nội dung |
+|---|--------|------|----------|
+| **x** | Data Type Layout | [x-data-layout-visual.md](./x-data-layout-visual.md) | Visual deep-dive đi kèm chương **a**: size/align/offset từng byte, padding, fat vs thin pointer, niche optimization, ZST, monomorphization |
+
 ---
 
 ## 🎯 Đề xuất lộ trình đọc theo level
 
 ### Beginner (mới học Rust)
-**Đọc thứ tự**: a → b → c → d → e → f → g
+**Đọc thứ tự**: a → **x** → b → c → d → e → f → g
+- Đọc **x** ngay sau **a**: nắm chắc *từng kiểu dữ liệu nằm trong bộ nhớ ra sao* trước khi học ownership
 - Tập trung hiểu sâu mỗi chương trước khi đi tiếp
 - Làm exercises trên https://doc.rust-lang.org/book/
 
@@ -97,7 +104,7 @@
 
 ## 📊 Thống kê
 
-- **23 chủ đề** × 2 files = **46 files**
+- **23 chủ đề** × 2 files + 1 phụ lục visual (x) = **47 files**
 - **~81,000 dòng** Markdown
 - **~8 MB** tài liệu
 - **~16 giờ đọc** end-to-end
