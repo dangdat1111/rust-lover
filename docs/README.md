@@ -1,6 +1,6 @@
 # Rust Foundations Library — Lộ trình đọc
 
-> Bộ tài liệu deep dive 19 chủ đề Rust, từ cơ bản đến production.
+> Bộ tài liệu deep dive 24 chủ đề Rust, từ cơ bản đến production & thiết kế hệ thống.
 > Mỗi chủ đề có 2 files: **theory** (lý thuyết) + **visual** (minh hoạ ASCII).
 > Đọc song song để hiểu sâu nhanh nhất.
 
@@ -15,7 +15,7 @@
 
 ---
 
-## 🗺️ Lộ trình 19 chương
+## 🗺️ Lộ trình 24 chương
 
 ### Phần I: Nền tảng ngôn ngữ (a-e)
 
@@ -71,6 +71,12 @@
 |---|--------|------|----------|
 | **x** | Data Type Layout | [x-data-layout-visual.md](./x-data-layout-visual.md) | Visual deep-dive đi kèm chương **a**: size/align/offset từng byte, padding, fat vs thin pointer, niche optimization, ZST, monomorphization |
 
+### Phần VI: Thiết kế & kiến trúc (y)
+
+| # | Chủ đề | File | Nội dung |
+|---|--------|------|----------|
+| **y** | Design Patterns | [y-design-patterns.md](./y-design-patterns.md) + [visual](./y-design-patterns-visual.md) | Từ zero đến senior: vì sao GoF sinh ra từ OOP & Rust đổi hình dạng pattern; Newtype/Builder/Typestate/RAII; Strategy/Observer/State/Decorator kiểu Rust; Hexagonal/DI/Repository/Actor/Event-driven; case study từ script đến hệ phân tán; antipattern + decision tree |
+
 ---
 
 ## 🎯 Đề xuất lộ trình đọc theo level
@@ -82,14 +88,16 @@
 - Làm exercises trên https://doc.rust-lang.org/book/
 
 ### Intermediate (đã quen Rust cơ bản)
-**Đọc thứ tự**: review (a-g) → h → i → j → m → o
+**Đọc thứ tự**: review (a-g) → h → i → j → m → o → **y**
 - Đào sâu vào memory, lifetime, smart pointers
 - Bắt đầu test code production-grade
+- Đọc **y** (design patterns) sau khi nắm trait/generic/closure: hiểu *vì sao* pattern GoF biến đổi trong Rust
 
 ### Advanced (sẵn sàng production)
-**Đọc thứ tự**: k → l → n → q → r
+**Đọc thứ tự**: k → l → n → q → r → **y**
 - Performance, observability, unsafe
 - Build production web service end-to-end
+- Đọc lại **y** ở góc kiến trúc: hexagonal, DI, actor, event-driven — thiết kế hệ từ nhỏ đến lớn
 
 ### Specialist (theo domain)
 - **Embedded developer**: p (sau khi nắm a-j)
@@ -104,7 +112,7 @@
 
 ## 📊 Thống kê
 
-- **23 chủ đề** × 2 files + 1 phụ lục visual (x) = **47 files**
+- **24 chủ đề** × 2 files + 1 phụ lục visual (x) = **49 files**
 - **~81,000 dòng** Markdown
 - **~8 MB** tài liệu
 - **~16 giờ đọc** end-to-end
@@ -186,7 +194,7 @@ Mỗi *-visual.md có 18-26 phần:
 
 ## Bước tiếp theo — Áp dụng vào project thực tế
 
-1. **Build side project** — small but production-quality, apply tất cả 19 chapters
+1. **Build side project** — small but production-quality, apply tất cả 24 chapters
 2. **Contribute to open source** — sqlx, axum, tokio, embedded-hal, tauri
 3. **Read mature Rust code** — rustc, tokio, axum, sqlx, serde
 4. **Follow Rust news** — This Week in Rust, Rust blog
