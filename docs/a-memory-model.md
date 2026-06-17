@@ -765,6 +765,38 @@ loop:
     BNE    loop            ; Thất bại → thử lại
 ```
 
+> **Khác biệt triết lý phần cứng:** x86 dùng `LOCK` (khóa rồi làm) — *bi quan*. ARM/RISC-V dùng LL/SC (cứ làm, store thất bại thì lặp lại) — *lạc quan*. Đây là lý do tồn tại `compare_exchange_weak` (xem bên dưới).
+
+## Vì sao atomic "đắt"? — Cache Coherence (MESI)
+
+Đây là tầng bản chất ít người đào tới. Atomic operations **không chậm vì lệnh CPU chậm**, mà vì chúng tạo ra **cache coherence traffic** giữa các core.
+
+Mỗi CPU core có cache **riêng** (L1/L2). Khi nhiều core cùng đọc/ghi một biến, phần cứng phải đảm bảo chúng không "nhìn thấy" giá trị mâu thuẫn. Giao thức **MESI** quản lý điều này — mỗi cache line ở 1 trong 4 trạng thái:
+
+```
+┌───────────┬────────────────────────────────────────────────┐
+│ Trạng thái│ Ý nghĩa                                         │
+├───────────┼────────────────────────────────────────────────┤
+│ Modified  │ Core này vừa GHI, bản duy nhất, RAM đã cũ      │
+│ Exclusive │ Chỉ core này có, sạch (= RAM)                  │
+│ Shared    │ Nhiều core cùng có bản copy (chỉ đọc)          │
+│ Invalid   │ Bản copy đã hỏng, phải đọc lại                 │
+└───────────┴────────────────────────────────────────────────┘
+```
+
+Khi core A muốn **ghi atomic**, nó phải kéo cache line về trạng thái `Modified` → buộc **mọi core khác** chuyển bản copy của chúng sang `Invalid`:
+
+```
+Trước:   Core A [Shared:5]   Core B [Shared:5]   ← cả hai cùng đọc
+                  │ A: fetch_add(1)
+                  ▼
+Sau:     Core A [Modified:6]  Core B [Invalid]   ← B phải đọc lại từ A
+```
+
+Lần đọc tiếp theo của B → cache miss → phải lấy từ A. Một `fetch_add` không tranh chấp ~5ns, nhưng khi cache line đang bị core khác giữ có thể tốn **40–400 chu kỳ**.
+
+> **Hệ quả trực tiếp:** atomic dưới tải tranh chấp cao (nhiều core cùng đập 1 biến) có thể **chậm hơn cả Mutex**. Và đây là gốc rễ của **false sharing** (xem cuối Phần IV).
+
 ## Atomic types trong Rust
 
 ```rust
@@ -780,7 +812,54 @@ counter.swap(10, Ordering::SeqCst);
 counter.compare_exchange(10, 20, Ordering::SeqCst, Ordering::SeqCst);
 ```
 
+Các kiểu có sẵn: `AtomicBool`, `AtomicU8..AtomicU64`, `AtomicI8..AtomicI64`, `AtomicUsize`/`AtomicIsize`, và `AtomicPtr<T>` (nền tảng cho lock-free data structures).
+
+> **Giới hạn bản chất:** kích thước atomic **không vượt quá word của CPU**. Không có `AtomicU128` ổn định trên hầu hết kiến trúc vì phần cứng không đảm bảo atomic cho 128-bit. Atomic chỉ áp dụng cho dữ liệu mà CPU hỗ trợ trực tiếp.
+
+## Bản chất: Interior Mutability qua `UnsafeCell`
+
+Câu hỏi mấu chốt: **vì sao nhiều thread cùng giữ `&AtomicI32` (shared, bất biến) mà vẫn ghi được?**
+
+```rust
+// Chữ ký thật trong std — KHÔNG cần &mut self:
+pub fn fetch_add(&self, val: i32, order: Ordering) -> i32
+//                ^^^^^ chỉ là shared reference!
+```
+
+Bí mật: bên trong mọi atomic type là một `UnsafeCell<T>` — "cánh cửa hậu" duy nhất trong Rust cho phép mutate qua `&` (interior mutability).
+
+```rust
+pub struct AtomicI32 {
+    v: UnsafeCell<i32>,   // mutate được qua &self
+}
+// Và được đánh dấu an toàn để chia sẻ giữa thread:
+unsafe impl Sync for AtomicI32 {}
+```
+
+Đây chính là mảnh ghép giải bài toán đầu Phần IV: borrow checker cấm 2 `&mut` cùng lúc, nên cách *duy nhất* để nhiều thread cùng ghi một biến **một cách hợp lệ** là qua atomic (hoặc qua lock — vốn cũng xây trên atomic). Không có đường vòng nào khác mà không phải `unsafe` + UB.
+
+## Toàn cảnh các thao tác
+
+```rust
+let a = AtomicUsize::new(0);
+
+// Đọc / ghi đơn thuần
+a.load(Relaxed);            a.store(10, Relaxed);
+
+// swap: ghi mới, TRẢ VỀ giá trị cũ (atomic)
+let old = a.swap(20, Relaxed);
+
+// fetch_*: read-modify-write, TRẢ VỀ giá trị TRƯỚC khi sửa
+a.fetch_add(5, Relaxed);    a.fetch_sub(1, Relaxed);
+a.fetch_or(0b100, Relaxed); a.fetch_and(0b110, Relaxed);
+a.fetch_xor(0b1, Relaxed);  a.fetch_max(99, Relaxed);  a.fetch_min(3, Relaxed);
+```
+
+> **Điểm dễ nhầm:** `fetch_*` luôn trả về giá trị **cũ** (trước khi cộng), không phải giá trị mới. `fetch_add` cũng chính là cách `Arc::clone` tăng reference count.
+
 ## Compare-And-Swap (CAS)
+
+Ý tưởng: *"Tôi nghĩ giá trị đang là X. Nếu đúng, đổi thành Y. Nếu sai (ai đó đã chen vào), cho tôi biết để thử lại."*
 
 ```rust
 loop {
@@ -793,6 +872,54 @@ loop {
 ```
 
 **CAS là nền tảng của TẤT CẢ lock-free programming.**
+
+### Đọc kỹ chữ ký `compare_exchange`
+
+```rust
+pub fn compare_exchange(
+    &self,
+    current: T,          // expected: chỉ ghi nếu giá trị HIỆN TẠI == current
+    new: T,              // giá trị mới muốn ghi
+    success: Ordering,   // ordering áp dụng khi CAS THÀNH CÔNG (là RMW)
+    failure: Ordering,   // ordering áp dụng khi THẤT BẠI (chỉ là 1 load)
+) -> Result<T, T>        // Ok(giá_trị_cũ) | Err(giá_trị_thực_tế_đang_có)
+```
+
+Hai điểm tinh tế:
+1. **Hai ordering riêng** — `success` cho nhánh ghi-được (read-modify-write), `failure` cho nhánh chỉ đọc. `failure` không bao giờ "mạnh hơn" `success` và không được là `Release`/`AcqRel` (vì thất bại thì không có ghi).
+2. **`Err` trả về giá trị thực tế** — dùng nó để cập nhật vòng lặp, khỏi cần `load` lại.
+
+### `compare_exchange` vs `compare_exchange_weak`
+
+```
+┌────────────────────────┬──────────────────────────────────────┐
+│ compare_exchange       │ Chỉ thất bại khi giá trị THỰC SỰ khác │
+│ (strong)               │ → đắt hơn trên ARM (vòng lặp ẩn)      │
+├────────────────────────┼──────────────────────────────────────┤
+│ compare_exchange_weak  │ Có thể thất bại GIẢ (spurious) dù      │
+│                        │ giá trị đúng → rẻ hơn, map thẳng LL/SC │
+└────────────────────────┴──────────────────────────────────────┘
+```
+
+Vì sao có bản `weak`? Trên ARM/RISC-V (LL/SC), nếu bị ngắt giữa `LDREX` và `STREX`, store thất bại **dù giá trị không đổi**. Bản `strong` phải bọc thêm vòng lặp ẩn để che giấu điều này → tốn thêm.
+
+> **Quy tắc:** trong một CAS loop, **luôn dùng `compare_exchange_weak`**. Bạn đã lặp sẵn rồi, một spurious failure chỉ tốn thêm một vòng vô hại. Chỉ dùng bản `strong` khi bạn CAS đúng một lần, không lặp.
+
+```rust
+// Tự cài fetch_add bằng CAS (minh họa bản chất của mọi RMW)
+fn atomic_add(a: &AtomicUsize, delta: usize) {
+    let mut cur = a.load(Ordering::Relaxed);
+    loop {
+        match a.compare_exchange_weak(
+            cur, cur + delta,
+            Ordering::AcqRel, Ordering::Relaxed,
+        ) {
+            Ok(_) => break,            // thành công
+            Err(actual) => cur = actual, // có người chen ngang → thử lại với giá trị mới
+        }
+    }
+}
+```
 
 ## Atomic vs Mutex
 
@@ -834,6 +961,69 @@ impl SimpleMutex {
     }
 }
 ```
+
+## Atomic trong thực tế: `Arc` đếm reference
+
+`Arc<T>` không phải phép màu — strong count của nó **chính là một `AtomicUsize`**. Đây là ví dụ đẹp nhất về việc *chọn ordering theo ngữ nghĩa thực tế* (chi tiết về ordering ở Phần V):
+
+```rust
+// Khi clone — chỉ tăng số đếm:
+self.strong.fetch_add(1, Ordering::Relaxed);   // Relaxed là ĐỦ
+
+// Khi drop — giảm số đếm, và nếu là cái cuối thì giải phóng:
+if self.strong.fetch_sub(1, Ordering::Release) != 1 {
+    return;                       // chưa phải cái cuối, xong
+}
+std::sync::atomic::fence(Ordering::Acquire);  // hàng rào trước khi free
+// ... là cái cuối → drop dữ liệu, giải phóng heap
+```
+
+Vì sao tăng dùng `Relaxed` mà giảm phải cẩn thận?
+
+- **Tăng (`clone`)**: chỉ là đếm, không đồng bộ hóa dữ liệu nào → `Relaxed` đủ rẻ.
+- **Giảm (`drop`)**: khi count về 0 ta sắp **giải phóng bộ nhớ**. Phải đảm bảo *mọi* thao tác của *mọi* thread khác trên dữ liệu đã "happens-before" việc free. `Release` ở mỗi lần giảm + một `Acquire` fence ở thread cuối tạo đúng ràng buộc đó — nếu không sẽ là use-after-free.
+
+> Bài học: ordering không phải "chọn cho mạnh". Nó phải khớp **chính xác** với quan hệ đồng bộ mà logic của bạn cần — không hơn (tốn hiệu năng), không kém (gây UB).
+
+## Cạm bẫy hiệu năng: False Sharing
+
+Hệ quả trực tiếp của MESI (đầu Phần IV). Hai biến atomic **độc lập về logic** nhưng nằm **cùng một cache line (64 byte)** sẽ "đập" lẫn nhau:
+
+```rust
+struct Counters {
+    a: AtomicU64,   // \  8 byte
+    b: AtomicU64,   //  } cùng MỘT cache line 64B
+}                   // /
+```
+
+```
+Core 0 ghi `a`  ─┐
+                 ├─→ cùng cache line → mỗi lần ghi INVALIDATE cache core kia
+Core 1 ghi `b`  ─┘     → ping-pong cache coherence → chậm thảm hại
+```
+
+Dù `a` và `b` chẳng liên quan, throughput có thể tệ hơn cả khi dùng 1 biến chung. **Giải pháp:** padding để mỗi biến chiếm riêng một cache line.
+
+```rust
+use crossbeam_utils::CachePadded;
+
+struct Counters {
+    a: CachePadded<AtomicU64>,   // mỗi cái được đệm tới đủ 1 cache line
+    b: CachePadded<AtomicU64>,
+}
+```
+
+> Quy tắc: khi mỗi core ghi một atomic *riêng* trong vòng lặp nóng → **luôn nghĩ tới false sharing**. Đo bằng `perf stat -e cache-misses`.
+
+## Khi nào KHÔNG nên dùng atomic
+
+Phần kết tinh tư duy trưởng thành:
+
+- **Atomic ≠ luôn nhanh hơn Mutex.** Với dữ liệu nhỏ (1 word) + tranh chấp thấp, atomic thắng. Nhưng dưới tranh chấp cao, chi phí cache coherence có thể khiến nó *thua* `parking_lot::Mutex`.
+- **Nhiều field cần đồng bộ cùng lúc** → dùng `Mutex`/`RwLock`. Atomic chỉ bảo vệ được *một* biến; cố ghép nhiều atomic lại thường dẫn tới bug ordering tinh vi.
+- **Lock-free tự viết cực khó đúng.** ABA, memory reclamation, ordering — sai mà test khó bắt (lỗi 1/triệu lần). Dùng `crossbeam`, `arc-swap` thay vì tự cài (xem Phần VII).
+
+> **Quy tắc vàng:** atomic dành cho **counter, flag, và làm building-block**. Mọi thứ phức tạp hơn — mặc định `Mutex`, chỉ chuyển sang atomic/lock-free khi *profiler* chứng minh là cần.
 
 ---
 
