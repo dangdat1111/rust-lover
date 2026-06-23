@@ -289,7 +289,7 @@ Stack:                          Heap:
 ┌──────────────┐               ┌──────────────────┐
 │ a: Rc<i32>   │               │ RcBox<i32> {     │
 │   ptr ───────┼──────────────►│   strong: 3      │
-└──────────────┘               │   weak:   1      │
+└──────────────┘               │   weak:   1      │ ← raw std (có +1 ẩn); weak_count()=0
 ┌──────────────┐               │   data:   5      │
 │ b: Rc<i32>   │   ┌──────────►│ }                │
 │   ptr ───────┼───┘           └──────────────────┘
@@ -301,11 +301,18 @@ Stack:                          Heap:
 ```
 
 Heap block chứa:
-- `strong: usize` — số strong references
-- `weak: usize` — số weak references (xem Tầng 5)
+- `strong: usize` — số **đồng sở hữu** (`Rc`/`Arc`). Về 0 → drop `data: T`.
+- `weak: usize` — **quan sát viên**. Về 0 → free cả block.
 - `data: T` — dữ liệu
 
-Khi `Rc::clone()`: `strong += 1`. Khi `Drop`: `strong -= 1`, nếu = 0 → drop `T`, nếu cả weak = 0 → free heap block.
+> ⚠️ **Có 2 cách đếm `weak` — đừng nhầm:**
+> - **`weak_count()`** = số `Weak<T>` **thật** bạn tạo qua `downgrade()`. Ở sơ đồ trên = **0** (chưa downgrade lần nào).
+> - **Trường `weak` thô** trong `RcBox`/`ArcInner` của std = `weak_count()` **+ 1 ẩn** — cả nhóm strong dùng chung 1 weak để giữ block sống chừng nào `data` còn. Vì vậy sơ đồ vẽ **`weak: 1`**.
+>
+> Công thức: `weak_thô = (số Weak<T>) + (1 nếu strong > 0)`, và `weak_count() = weak_thô − 1` (khi `strong > 0`).
+> **Quy ước trong toàn bộ docs này:** sơ đồ vẽ **trường thô** (giống `RcBox` thật) và **chú thích kèm `weak_count()`** để khỏi nhầm.
+
+Khi `Rc::clone()`: `strong += 1`. Khi `Drop`: `strong -= 1`; nếu = 0 → drop `T` (đồng thời nhả 1 weak ẩn); nếu cả `weak` thô = 0 → free heap block.
 
 ## 3.4 Rc<T> là immutable
 
@@ -410,6 +417,8 @@ Trước clone:                       Sau `let b = Rc::clone(&a);`
     ▼                                   ├─► RcBox{ strong:2, weak:1, data:[..] }
  RcBox{ strong:1, weak:1, data }     b ─┘     (CÙNG block — data KHÔNG nhân đôi)
 ```
+
+> `weak:1` ở trên là **trường thô** (chưa có `Weak<T>` nào → `weak_count()` = 0). Xem callout ở Tầng 3.3.
 
 → Clone là **O(1)**, không phụ thuộc size của `T`. Clone một `Rc<[u8; 1_000_000]>` cũng chỉ là tăng 1 counter + copy 8 byte con trỏ — không hề copy 1 MB. Đây là khác biệt bản chất với `.clone()` của một kiểu thường (deep copy).
 

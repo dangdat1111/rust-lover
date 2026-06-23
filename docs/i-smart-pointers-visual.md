@@ -140,6 +140,9 @@
    
    Tất cả 3 trỏ vào 1 block.
    strong=3 → drop a, b, c lần lượt → counter 3→2→1→0 → free.
+   ⚠️ weak=1 ở đây = TRƯỜNG THÔ của std (gồm +1 ẩn của nhóm strong).
+        weak_count() = 0 vì chưa có Weak<T> nào (chưa downgrade).
+        Công thức: weak_thô = (#Weak) + (1 nếu strong>0).
    
    
    Sau Rc::clone:
@@ -342,7 +345,7 @@
    ┌────────────────────────────┐
    │ Parent                     │
    │   strong: 1                │
-   │   weak: 2                  │  ← children có 2 Weak trỏ về
+   │   weak: 2                  │  ← weak_count()=2 (2 Weak thật); raw std=3 (+1 ẩn)
    │   children: [Rc, Rc] ──┐   │
    └───────────────────────┼─┬─┘
                            │ │
@@ -584,7 +587,7 @@
    ┌──────────────┐     ┌─────────────────────────┐
    │ data: Arc    │     │ ArcInner {              │
    │   ptr ───────┼────►│   strong: N             │
-   └──────────────┘     │   weak: 1               │
+   └──────────────┘     │   weak: 1               │ ← raw (weak_count()=0)
                         │   data: Mutex<i32> {    │
                         │     poisoned: AtomicBool│
                         │     sys: pthread_mutex_t│
@@ -769,7 +772,7 @@
    ┌───────────────────────────────────────────────────┐
    │ Heap: ArcInner {                                  │
    │   strong: 5  ◄── (4 workers + main)               │
-   │   weak: 1                                         │
+   │   weak: 1    ◄── raw std (+1 ẩn); weak_count()=0   │
    │   data: Mutex<HashMap<String, Arc<User>>> {       │
    │     poisoned: false,                              │
    │     value: HashMap {                              │
