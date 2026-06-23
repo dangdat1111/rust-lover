@@ -236,6 +236,63 @@
    ⟹ Arc<T> implements Send + Sync khi T: Send + Sync
 ```
 
+### Arc::clone / Arc::drop — Memory ordering (vì sao đúng)
+
+```
+   ┌────────────────────────────────────────────────────────────────┐
+   │ CLONE — chỉ cần Relaxed                                         │
+   ├────────────────────────────────────────────────────────────────┤
+   │   self.strong.fetch_add(1, Relaxed)                            │
+   │                                                                │
+   │   "Tôi đã đang giữ 1 Arc → object CÒN SỐNG → không ai free     │
+   │    được lúc này. Tôi chỉ ĐẾM, không đọc/ghi data."             │
+   │   ⟹ không cần đồng bộ hoá vùng nhớ nào → memory barrier = 0    │
+   └────────────────────────────────────────────────────────────────┘
+
+   ┌────────────────────────────────────────────────────────────────┐
+   │ DROP — Release khi giảm, Acquire trước khi free                │
+   ├────────────────────────────────────────────────────────────────┤
+   │   if strong.fetch_sub(1, Release) != 1 { return }  ← chưa cuối  │
+   │   fence(Acquire)                                   ← là cuối    │
+   │   drop(data); free(heap)                                        │
+   └────────────────────────────────────────────────────────────────┘
+
+
+   Vì sao cặp Release/Acquire là BẮT BUỘC:
+   ───────────────────────────────────────
+
+   Thread A                          Thread B (giảm cuối → 0)
+   ─────────                         ───────────────────────
+   ghi data .........
+   fetch_sub(Release) ──────┐
+                            │  synchronizes-with
+                            └───────► fence(Acquire)
+                                          │ happens-before
+                                          ▼
+                                      destructor(data)  ← THẤY ghi của A ✓
+                                      free(heap)         ← an toàn ✓
+
+   Thiếu Release/Acquire → CPU có thể free TRƯỚC khi A ghi xong
+                          → use-after-free / double-free 💥
+
+
+   Toàn cảnh ordering trong vòng đời refcount:
+   ───────────────────────────────────────────
+   Arc::clone      strong.fetch_add(1, Relaxed)       ← rẻ nhất
+   Arc::drop       strong.fetch_sub(1, Release)        ← công bố
+                   + fence(Acquire) nếu về 0           ← thu nhận
+   Weak::clone     weak.fetch_add(1, Relaxed)
+   Weak::upgrade   strong.compare_exchange(...)        ← CAS: chỉ +1 nếu > 0
+   overflow guard  old > MAX_REFCOUNT → process::abort()
+
+
+   Rc vs Arc — cùng layout, khác counter:
+   ──────────────────────────────────────
+   Rc::clone   strong += 1            (Cell<usize>,  non-atomic, ~1ns)
+   Arc::clone  strong.fetch_add(...)  (AtomicUsize,  atomic,    ~10-20ns)
+        cả hai: copy 8B con trỏ, KHÔNG copy data → O(1) theo sizeof(T)
+```
+
 ---
 
 ## 7. Rc vs Arc — Khi nào dùng cái nào?

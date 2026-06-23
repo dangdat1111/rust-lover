@@ -382,6 +382,39 @@ Lý do: counter không atomic — thread khác tăng/giảm cùng lúc → race.
 - GUI scene graph (parent-child reference)
 - Shared config (read-only) trong single-thread
 
+## 3.10 Cơ chế `clone()` ở mức bộ nhớ — non-atomic
+
+Đây là điểm dễ hiểu lầm nhất: `Rc::clone` **KHÔNG** đụng tới `data: T`. Nó chỉ làm đúng 2 việc trên control block (`RcBox`):
+
+1. Đọc `strong`, cộng 1, ghi lại — bằng phép `+1` **thường** (non-atomic), vì counter là `Cell<usize>`.
+2. Trả về một `Rc` mới chứa **cùng một con trỏ** tới control block.
+
+```rust
+// Mô phỏng (đơn giản hoá) từ std:
+impl<T> Clone for Rc<T> {
+    fn clone(&self) -> Rc<T> {
+        let n = self.inner().strong.get();   // strong: Cell<usize> → KHÔNG atomic
+        self.inner().strong.set(n + 1);
+        Rc { ptr: self.ptr }                 // copy con trỏ, KHÔNG copy T
+    }
+}
+```
+
+**Vì sao `+1` thường là an toàn?** Vì `Rc<T>` là `!Send + !Sync` (Tầng 3.7) → compiler **cấm** nó vượt biên thread → không bao giờ có 2 thread cùng sờ vào `strong` cùng lúc → không thể data race trên counter. Đây chính là lý do Rc nhanh: nó "mua" tốc độ bằng cách **từ bỏ multi-thread**.
+
+Sơ đồ thay đổi bộ nhớ khi clone:
+
+```
+Trước clone:                       Sau `let b = Rc::clone(&a);`
+ a ─┐                                a ─┐
+    ▼                                   ├─► RcBox{ strong:2, weak:1, data:[..] }
+ RcBox{ strong:1, weak:1, data }     b ─┘     (CÙNG block — data KHÔNG nhân đôi)
+```
+
+→ Clone là **O(1)**, không phụ thuộc size của `T`. Clone một `Rc<[u8; 1_000_000]>` cũng chỉ là tăng 1 counter + copy 8 byte con trỏ — không hề copy 1 MB. Đây là khác biệt bản chất với `.clone()` của một kiểu thường (deep copy).
+
+Cặp đối xứng khi `Drop`: `strong -= 1` (cũng non-atomic); nếu `strong == 0` → gọi destructor của `T` rồi (nếu `weak == 0`) free luôn block.
+
 ---
 
 # Tầng 4: Arc<T> — Atomic Rc cho multi-thread
@@ -476,6 +509,108 @@ Khi config **immutable**, Arc thuần là pattern siêu phổ biến.
 ```
 
 **Quy tắc thực dụng**: nếu bạn không chắc, dùng Arc. Performance penalty nhỏ thường không đáng so với refactor sau này.
+
+## 4.8 Cơ chế `Arc::clone` ở mức bộ nhớ — atomic increment
+
+Giống Rc, `Arc::clone` chỉ copy con trỏ + tăng `strong`, **không copy `data`**. Khác biệt **duy nhất nhưng cốt tử**: `strong` là `AtomicUsize`, nên phép tăng phải là **atomic read-modify-write** (`fetch_add`):
+
+```rust
+// Mô phỏng từ std (lược phần overflow guard — xem 4.12):
+impl<T> Clone for Arc<T> {
+    fn clone(&self) -> Arc<T> {
+        let old = self.inner().strong.fetch_add(1, Ordering::Relaxed);
+        // ... check overflow ...
+        Arc { ptr: self.ptr }
+    }
+}
+```
+
+`fetch_add` đảm bảo: nếu 100 thread cùng `clone()` một lúc, counter tăng **đúng** 100, không mất update. Một phép `+1` thường (`load` → `+1` → `store`) sẽ bị **lost update** khi 2 core xen kẽ → count sai → cuối cùng là double-free hoặc memory leak. Đó là lý do `Rc` không thể dùng cho multi-thread, còn `Arc` tồn tại.
+
+## 4.9 Vì sao `clone` chỉ cần `Relaxed`?
+
+`Ordering::Relaxed` = "đảm bảo **atomicity** của riêng phép này, KHÔNG đồng bộ hoá bất kỳ vùng nhớ nào khác". Nghe có vẻ liều — nhưng với `clone` nó **vừa đủ và đúng**:
+
+- Để gọi được `self.clone()`, bạn **đã đang giữ một `Arc`** rồi → `strong ≥ 1` → object **chắc chắn còn sống**, không thread nào free nó ngay lúc này.
+- `clone` không **đọc/ghi `data`**, cũng không "công bố" hay "thu nhận" dữ liệu nào — chỉ làm counter `+1`.
+- Quan hệ happens-before cần để thấy `data` hợp lệ **đã được thiết lập từ trước** bởi chính cái `Arc` bạn đang cầm.
+
+→ Không cần `Acquire`/`Release` → tiết kiệm memory barrier → clone rẻ nhất có thể mà vẫn đúng.
+
+> 🧠 Trực giác: *"Tôi tăng số người tham chiếu — nhưng vì chính tôi đã là một người tham chiếu, chẳng ai phá được nhà trong lúc tôi đang đếm."*
+
+## 4.10 `drop` của Arc — `Release` rồi `Acquire`
+
+Đây là nửa khó. Khi một `Arc` bị drop:
+
+```rust
+impl<T> Drop for Arc<T> {
+    fn drop(&mut self) {
+        // 1) Giảm strong bằng Release
+        if self.inner().strong.fetch_sub(1, Ordering::Release) != 1 {
+            return;                    // chưa phải owner cuối → xong, KHÔNG free
+        }
+        // 2) Mình là owner cuối (vừa đưa count 1 → 0)
+        std::sync::atomic::fence(Ordering::Acquire);   // hàng rào trước khi huỷ
+        // 3) drop data T + giải phóng heap
+        unsafe { self.drop_slow(); }
+    }
+}
+```
+
+Vì sao cặp `Release` (lúc giảm) + `Acquire` (trước khi free) là **bắt buộc**:
+
+- **`Release` ở mỗi lần giảm:** mọi thao tác ghi mà thread này từng làm lên `data` (qua `Arc`) phải hoàn tất & "đẩy ra" **trước** khi nó buông quyền sở hữu. Nó *công bố*: "tôi đã xong việc với dữ liệu".
+- **`Acquire` ở thread giảm cuối cùng:** thread đưa count về 0 phải **nhìn thấy toàn bộ** các ghi của *mọi* thread khác từng giữ Arc, **trước khi** chạy destructor của `T` và `free` bộ nhớ. `Acquire` *thu nhận* tất cả các `Release` kia.
+
+Thiếu cặp này, CPU/compiler được phép sắp xếp lại lệnh sao cho `free` chạy **trước** khi một thread khác kịp hoàn tất ghi lên `data` → **use-after-free / double-free**. Đây không phải lý thuyết suông — đó chính là loại bug mà memory model sinh ra để chặn.
+
+> 💡 Vì sao dùng `fence(Acquire)` **riêng** thay vì `fetch_sub(1, AcqRel)`? Để chỉ trả phí `Acquire` ở **đúng lần cuối**. Các lần giảm không-phải-cuối chỉ cần `Release` (rẻ hơn). Lại là một ví dụ "chọn ordering tối thiểu vừa đủ" — đúng tinh thần [a-memory-model.md](./a-memory-model.md) (mục *Atomic trong thực tế: Arc đếm reference*).
+
+## 4.11 Bức tranh happens-before tổng thể
+
+```
+Thread A (ghi rồi buông):          Thread B (owner cuối, sắp free):
+  ghi vào data .........
+  drop Arc:
+    strong.fetch_sub(Release) ──┐
+                                │  synchronizes-with
+                                └────► fence(Acquire)
+                                          │ happens-before
+                                          ▼
+                                       destructor(data)  ← THẤY ghi của A ✓
+                                       free(heap)         ← an toàn ✓
+```
+
+Chuỗi happens-before hoàn chỉnh:
+
+```
+use data (A) → decrement Release (A) → [synchronizes-with] → fence Acquire (B) → drop & free (B)
+```
+
+→ Đảm bảo **không thread nào còn đang dùng `data` khi nó bị huỷ**, và thread huỷ **thấy trạng thái mới nhất**. Đây là toàn bộ lý do `Arc` an toàn để chia sẻ giữa các thread — không phải nhờ "phép màu", mà nhờ chọn đúng ordering.
+
+## 4.12 Hai chi tiết "khó nhằn" còn lại
+
+**1. Overflow guard.** Nếu có `~usize::MAX` lần clone (vd `mem::forget` lặp), counter sẽ tràn về 0 → free nhầm khi vẫn còn `Arc` đang sống → UB. std chặn bằng cách kiểm tra `old` rồi **`abort()`** (không `panic`, vì panic có thể bị bắt và để lại counter ở trạng thái hỏng):
+
+```rust
+let old = self.inner().strong.fetch_add(1, Ordering::Relaxed);
+if old > MAX_REFCOUNT {           // ~ isize::MAX
+    std::process::abort();
+}
+```
+
+**2. Clone của `Weak`.** `Weak::clone` tăng `weak` (cũng `Relaxed`), không đụng `strong`. `Arc::downgrade` tăng `weak`; còn `Weak::upgrade` phải `compare_exchange` trên `strong` (CAS) để **chỉ tăng nếu `strong > 0`** — nếu object đã chết (`strong == 0`) thì trả `None`. Đây là chỗ duy nhất trong vòng đời count cần CAS thay vì `fetch_add` thuần, vì nó vừa phải kiểm tra điều kiện vừa phải tăng một cách atomic.
+
+| Thao tác | Counter | Ordering | Ghi chú |
+|----------|---------|----------|---------|
+| `Arc::clone` | `strong += 1` | `Relaxed` | đã giữ ref → object còn sống |
+| `Arc::drop` (không cuối) | `strong -= 1` | `Release` | công bố ghi của mình |
+| `Arc::drop` (cuối, →0) | `+ fence` | `Acquire` | thu nhận trước khi free |
+| `Weak::clone` | `weak += 1` | `Relaxed` | không cản drop của data |
+| `Weak::upgrade` | `strong` CAS | `Acquire`/`Relaxed` | chỉ +1 nếu `> 0`, else `None` |
+| overflow | — | — | `old > MAX_REFCOUNT` → `process::abort()` |
 
 ---
 
@@ -1638,6 +1773,29 @@ Trong hot path:
 - Atomic ops gây **cache line ping-pong** giữa cores → tránh contention bằng sharding
 - Lock contention làm syscall → tránh bằng lock-free structure khi possible
 - False sharing: 2 atomic field trên cùng cache line ảnh hưởng lẫn nhau → padding (`#[repr(align(64))]`)
+
+## `clone()` — nơi 2 tầng memory model gặp nhau
+
+`Rc::clone`/`Arc::clone` là ví dụ gọn nhất cho thấy "memory model" thực ra có **2 tầng** và clone chạm cả hai:
+
+```
+┌─ Tầng 1: MEMORY LAYOUT (nằm ở đâu) ──────────────────────────────┐
+│  clone KHÔNG copy `data: T`. Nó copy 8 byte con trỏ trên stack    │
+│  và tăng counter trong control block dùng chung trên heap.        │
+│  ⟹ O(1), độc lập với sizeof(T). Đây là "shared ownership".        │
+└──────────────────────────────────────────────────────────────────┘
+┌─ Tầng 2: CONCURRENCY MEMORY MODEL (atomic ordering) ─────────────┐
+│  Rc : counter là Cell<usize> → +1 thường. An toàn vì !Send+!Sync. │
+│  Arc: counter là AtomicUsize →                                    │
+│        clone → fetch_add(Relaxed)      (4.9: vì sao đủ)            │
+│        drop  → fetch_sub(Release) + fence(Acquire)  (4.10–4.11)   │
+│  ⟹ Đúng đắn KHÔNG đến từ "atomic" mà từ CHỌN ĐÚNG ORDERING.       │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+Chốt lại: `Rc/Arc::clone` = "tăng refcount", **không** sao chép dữ liệu — nó cấp thêm *shared ownership* trên cùng một vùng heap. Liên hệ với memory model nằm ở (a) layout có control block nhúng counter cạnh `data`, và (b) với `Arc`, tính đúng đắn phụ thuộc hoàn toàn vào mô hình release/acquire để vừa không data race vừa không đồng bộ thừa.
+
+> Xem thêm góc nhìn từ phía atomic/CPU trong [a-memory-model.md](./a-memory-model.md) — mục *"Atomic trong thực tế: Arc đếm reference"* và Phần V (ordering). Hai tài liệu bổ trợ nhau: ở đây nhìn từ **smart pointer**, bên kia nhìn từ **memory/CPU**.
 
 ---
 
