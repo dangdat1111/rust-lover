@@ -77,6 +77,12 @@
 |---|--------|------|----------|
 | **y** | Design Patterns | [y-design-patterns.md](./y-design-patterns.md) + [visual](./y-design-patterns-visual.md) | Từ zero đến senior: vì sao GoF sinh ra từ OOP & Rust đổi hình dạng pattern; Newtype/Builder/Typestate/RAII; Strategy/Observer/State/Decorator kiểu Rust; Hexagonal/DI/Repository/Actor/Event-driven; case study từ script đến hệ phân tán; antipattern + decision tree |
 
+### Bổ sung: Tối ưu vi mô (z)
+
+| # | Chủ đề | File | Nội dung |
+|---|--------|------|----------|
+| **z** | SIMD & Data-Oriented | [z-simd.md](./z-simd.md) + [visual](./z-simd-visual.md) | Đi kèm chương **k** + **x**: SISD vs SIMD, lanes/registers/ISA (SSE/AVX2/NEON), AoS vs SoA, auto-vectorization + `target-cpu`, kiểm chứng asm/criterion, `std::simd` portable, `core::arch` intrinsics + `target_feature` + runtime dispatch, branchless mask, tail handling, SIMD ⟂ rayon |
+
 ---
 
 ## 🎯 Đề xuất lộ trình đọc theo level
@@ -94,8 +100,9 @@
 - Đọc **y** (design patterns) sau khi nắm trait/generic/closure: hiểu *vì sao* pattern GoF biến đổi trong Rust
 
 ### Advanced (sẵn sàng production)
-**Đọc thứ tự**: k → l → n → q → r → **y**
+**Đọc thứ tự**: k → **z** → l → n → q → r → **y**
 - Performance, observability, unsafe
+- Đọc **z** (SIMD) ngay sau **k**: sau khi nắm "đo trước đoán sau", học micro-optimization đúng cách (SoA → auto-vec → intrinsics)
 - Build production web service end-to-end
 - Đọc lại **y** ở góc kiến trúc: hexagonal, DI, actor, event-driven — thiết kế hệ từ nhỏ đến lớn
 
@@ -107,12 +114,13 @@
 - **CLI tool builder**: u (sau khi nắm a-h, plus g cho error handling)
 - **Microservices/gRPC dev**: v (sau khi nắm f, g, l, q)
 - **Network protocol designer**: w (sau khi nắm f, g, n, v)
+- **HPC / data-crunching dev**: z (sau khi nắm a, k, n, m)
 
 ---
 
 ## 📊 Thống kê
 
-- **24 chủ đề** × 2 files + 1 phụ lục visual (x) = **49 files**
+- **24 chủ đề** × 2 files + 2 bổ sung (x visual, z theory+visual) = **51 files**
 - **~81,000 dòng** Markdown
 - **~8 MB** tài liệu
 - **~16 giờ đọc** end-to-end
